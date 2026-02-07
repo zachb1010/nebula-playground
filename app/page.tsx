@@ -90,8 +90,10 @@ export default function NebulaDefender() {
   const [energy, setEnergy] = useState(100)
   const [highScore, setHighScore] = useState(0)
   const [showUI, setShowUI] = useState(true)
+  const [enemiesKilled, setEnemiesKilled] = useState(0)
 
   const scoreRef = useRef(0)
+  const enemiesKilledRef = useRef(0)
   const coreHealthRef = useRef(100)
   const waveRef = useRef(1)
   const gameStateRef = useRef<'menu' | 'playing' | 'gameover'>('menu')
@@ -106,6 +108,7 @@ export default function NebulaDefender() {
   useEffect(() => { gameStateRef.current = gameState }, [gameState])
   useEffect(() => { comboRef.current = combo }, [combo])
   useEffect(() => { energyRef.current = energy }, [energy])
+  useEffect(() => { enemiesKilledRef.current = enemiesKilled }, [enemiesKilled])
 
   const startGame = useCallback(() => {
     setScore(0)
@@ -113,6 +116,7 @@ export default function NebulaDefender() {
     setWave(1)
     setCombo(0)
     setEnergy(100)
+    setEnemiesKilled(0)
     setGameState('playing')
     enemiesRef.current = []
     orbsRef.current = []
@@ -282,14 +286,20 @@ export default function NebulaDefender() {
       return 0
     }
 
-    const triggerBlast = (x: number, y: number) => {
-      if (energyRef.current < 25) return false
+    const doBlast = (x: number, y: number) => {
+      if (energyRef.current < 25) return
+      if (gameStateRef.current !== 'playing') return
       
-      setEnergy(prev => prev - 25)
+      // Use valid coordinates (default to center if mouse never moved)
+      const blastX = x || width / 2
+      const blastY = y || height / 2
+      
+      energyRef.current -= 25
+      setEnergy(energyRef.current)
       
       wavesRef.current.push({
-        x,
-        y,
+        x: blastX,
+        y: blastY,
         radius: 0,
         maxRadius: forceRadius * 2,
         hue: 50,
@@ -298,8 +308,8 @@ export default function NebulaDefender() {
       })
 
       explosionsRef.current.push({
-        x,
-        y,
+        x: blastX,
+        y: blastY,
         radius: 0,
         maxRadius: forceRadius * 1.5,
         hue: 50,
@@ -307,8 +317,10 @@ export default function NebulaDefender() {
       })
 
       shakeRef.current.intensity = 10
-      return true
     }
+    
+    // Store blast function in ref so event handlers can access it
+    const blastFn = doBlast
 
     const updateGame = () => {
       if (gameStateRef.current !== 'playing') return
@@ -327,19 +339,22 @@ export default function NebulaDefender() {
         setCombo(0)
       }
 
-      // Spawn enemies
-      const spawnRate = Math.max(60, 180 - waveRef.current * 10)
+      // Spawn enemies - faster spawns for better pacing
+      const spawnRate = Math.max(40, 90 - waveRef.current * 5)
       if (timeRef.current - lastSpawnRef.current > spawnRate) {
-        const count = Math.min(1 + Math.floor(waveRef.current / 3), 5)
+        const count = Math.min(1 + Math.floor(waveRef.current / 2), 4)
         for (let i = 0; i < count; i++) {
           enemiesRef.current.push(spawnEnemy(width, height, waveRef.current))
         }
         lastSpawnRef.current = timeRef.current
       }
 
-      // Wave progression
-      if (scoreRef.current > waveRef.current * 500) {
+      // Wave progression - based on kills, not score
+      const killsNeeded = 5 + waveRef.current * 3 // Wave 1: 8 kills, Wave 2: 11, etc.
+      if (enemiesKilledRef.current >= killsNeeded * waveRef.current) {
         setWave(prev => prev + 1)
+        // Brief pause between waves
+        lastSpawnRef.current = timeRef.current + 60
       }
 
       // Update enemies
@@ -440,6 +455,7 @@ export default function NebulaDefender() {
           const comboMultiplier = 1 + comboRef.current * 0.1
           setScore(prev => prev + Math.floor(baseScore * comboMultiplier))
           setCombo(prev => Math.min(prev + 1, 50))
+          setEnemiesKilled(prev => prev + 1)
           comboTimerRef.current = 120
 
           // Death explosion
@@ -841,7 +857,7 @@ export default function NebulaDefender() {
 
     const handleMouseDown = () => {
       if (mode === 'blast') {
-        triggerBlast(mouseRef.current.x, mouseRef.current.y)
+        blastFn(mouseRef.current.x, mouseRef.current.y)
       }
     }
 
@@ -859,7 +875,7 @@ export default function NebulaDefender() {
       mouseRef.current.y = touch.clientY
       mouseRef.current.active = true
       if (mode === 'blast') {
-        triggerBlast(touch.clientX, touch.clientY)
+        blastFn(touch.clientX, touch.clientY)
       }
     }
 
@@ -873,11 +889,15 @@ export default function NebulaDefender() {
       if (e.key === '2') setMode('attract')
       if (e.key === '3') setMode('vortex')
       if (e.key === '4') setMode('blast')
-      if (e.key === ' ' && gameStateRef.current === 'playing') {
+      if (e.key === ' ') {
         e.preventDefault()
-        triggerBlast(mouseRef.current.x, mouseRef.current.y)
+        if (gameStateRef.current === 'playing') {
+          blastFn(mouseRef.current.x, mouseRef.current.y)
+        } else {
+          startGame()
+        }
       }
-      if ((e.key === 'Enter' || e.key === ' ') && gameStateRef.current !== 'playing') {
+      if (e.key === 'Enter' && gameStateRef.current !== 'playing') {
         e.preventDefault()
         startGame()
       }
