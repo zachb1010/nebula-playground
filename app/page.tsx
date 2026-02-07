@@ -193,8 +193,6 @@ export default function NebulaDefender() {
         strength: 25
       })
       
-      console.log('BLAST!', bx, by, 'Energy:', game.energy)
-      
       explosionsRef.current.push({
         x: bx, y: by,
         radius: 0,
@@ -717,7 +715,7 @@ export default function NebulaDefender() {
         ctx.font = '11px system-ui'
         ctx.fillStyle = 'rgba(255,255,255,0.5)'
         ctx.textAlign = 'right'
-        ctx.fillText('ENERGY (Space/Click = blast)', ex - 8, ey + 6)
+        ctx.fillText('ENERGY (Space = blast)', ex - 8, ey + 6)
         
         // Controls hint
         ctx.font = '11px system-ui'
@@ -742,7 +740,8 @@ export default function NebulaDefender() {
     
     const handleMouseLeave = () => { mouseRef.current.active = false }
     
-    const handleMouseDown = () => { doBlast() }
+    // Removed: clicking was breaking the game
+    // Use Space key for blast instead
     
     const handleTouchMove = (e: TouchEvent) => {
       e.preventDefault()
@@ -781,7 +780,6 @@ export default function NebulaDefender() {
     window.addEventListener('keydown', handleKeyDown)
     canvas.addEventListener('mousemove', handleMouseMove)
     canvas.addEventListener('mouseleave', handleMouseLeave)
-    canvas.addEventListener('mousedown', handleMouseDown)
     canvas.addEventListener('touchmove', handleTouchMove, { passive: false })
     canvas.addEventListener('touchstart', handleTouchStart, { passive: false })
     canvas.addEventListener('touchend', handleTouchEnd)
@@ -793,7 +791,6 @@ export default function NebulaDefender() {
       window.removeEventListener('keydown', handleKeyDown)
       canvas.removeEventListener('mousemove', handleMouseMove)
       canvas.removeEventListener('mouseleave', handleMouseLeave)
-      canvas.removeEventListener('mousedown', handleMouseDown)
       canvas.removeEventListener('touchmove', handleTouchMove)
       canvas.removeEventListener('touchstart', handleTouchStart)
       canvas.removeEventListener('touchend', handleTouchEnd)
@@ -809,15 +806,11 @@ export default function NebulaDefender() {
       
       {/* Mode buttons */}
       {game.state === 'playing' && (
-        <div 
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex gap-2"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex gap-2">
           {(['repel', 'attract', 'vortex'] as Mode[]).map((m, i) => (
             <button
               key={m}
-              onClick={(e) => { e.stopPropagation(); setMode(m) }}
-              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => setMode(m)}
               className={`px-5 py-2.5 rounded-xl text-sm font-bold uppercase tracking-wide transition-all ${
                 mode === m
                   ? m === 'repel' ? 'bg-red-500 text-white shadow-lg shadow-red-500/40'
