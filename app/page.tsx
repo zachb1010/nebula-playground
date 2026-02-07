@@ -179,9 +179,9 @@ export default function NebulaDefender() {
       const mouse = mouseRef.current
       
       if (game.state !== 'playing') return
-      if (game.energy < 30) return
+      if (game.energy < 20) return
       
-      game.energy -= 30
+      game.energy -= 20
       
       const bx = mouse.active ? mouse.x : game.width / 2
       const by = mouse.active ? mouse.y : game.height / 2
@@ -189,9 +189,11 @@ export default function NebulaDefender() {
       blastsRef.current.push({
         x: bx, y: by,
         radius: 0,
-        maxRadius: 250,
-        strength: 20
+        maxRadius: 300,
+        strength: 25
       })
+      
+      console.log('BLAST!', bx, by, 'Energy:', game.energy)
       
       explosionsRef.current.push({
         x: bx, y: by,
@@ -279,28 +281,28 @@ export default function NebulaDefender() {
           }
         }
 
-        // Player force
+        // Player force - deals real damage!
         if (mouse.active) {
-          const force = applyForce(e, mouse.x, mouse.y, forceRadius, forceStrength * 0.7, mode)
-          if (force > forceStrength * 0.25) {
-            e.stunned = Math.max(e.stunned, 12)
-            e.health -= force * 0.01
+          const force = applyForce(e, mouse.x, mouse.y, forceRadius, forceStrength * 0.8, mode)
+          if (force > forceStrength * 0.2) {
+            e.stunned = Math.max(e.stunned, 15)
+            e.health -= force * 0.04 // 4x more damage
           }
         }
 
-        // Blast waves
+        // Blast waves - deal heavy damage!
         for (const blast of blastsRef.current) {
           const bdx = e.x - blast.x
           const bdy = e.y - blast.y
           const bdist = Math.sqrt(bdx * bdx + bdy * bdy)
           
-          if (Math.abs(bdist - blast.radius) < 50) {
-            const force = blast.strength * (1 - Math.abs(bdist - blast.radius) / 50)
+          if (Math.abs(bdist - blast.radius) < 60) {
+            const force = blast.strength * (1 - Math.abs(bdist - blast.radius) / 60)
             if (bdist > 0) {
-              e.vx += (bdx / bdist) * force * 0.6
-              e.vy += (bdy / bdist) * force * 0.6
-              e.health -= force * 0.03
-              e.stunned = Math.max(e.stunned, 20)
+              e.vx += (bdx / bdist) * force * 0.8
+              e.vy += (bdy / bdist) * force * 0.8
+              e.health -= force * 0.08 // Heavy damage from blast
+              e.stunned = Math.max(e.stunned, 25)
             }
           }
         }
@@ -309,6 +311,37 @@ export default function NebulaDefender() {
         e.vy *= 0.96
         e.x += e.vx
         e.y += e.vy
+
+        // Kill if pushed off screen!
+        const margin = 50
+        if (e.x < -margin || e.x > game.width + margin || 
+            e.y < -margin || e.y > game.height + margin) {
+          // Only count as kill if they were pushed (have velocity away from center)
+          const awayFromCenter = (e.x < cx && e.vx < -1) || (e.x > cx && e.vx > 1) ||
+                                  (e.y < cy && e.vy < -1) || (e.y > cy && e.vy > 1)
+          if (awayFromCenter) {
+            orbsRef.current.push({
+              x: Math.max(20, Math.min(game.width - 20, e.x)),
+              y: Math.max(20, Math.min(game.height - 20, e.y)),
+              vx: 0, vy: 0, hue: 170, value: 1, life: 300
+            })
+            
+            const baseScore = e.type === 'tank' ? 30 : e.type === 'fast' ? 12 : 8
+            game.score += Math.floor(baseScore * (1 + game.combo * 0.15))
+            game.combo = Math.min(game.combo + 1, 30)
+            game.comboTimer = 90
+            game.kills++
+            
+            if (game.kills >= game.killsForWave) {
+              game.wave++
+              game.killsForWave = game.kills + 6 + game.wave * 2
+              lastSpawnRef.current = frameRef.current + 40
+            }
+            
+            enemies.splice(i, 1)
+            continue
+          }
+        }
 
         // Hit core
         const coreDist = Math.sqrt(Math.pow(e.x - cx, 2) + Math.pow(e.y - cy, 2))
@@ -684,7 +717,7 @@ export default function NebulaDefender() {
         ctx.font = '11px system-ui'
         ctx.fillStyle = 'rgba(255,255,255,0.5)'
         ctx.textAlign = 'right'
-        ctx.fillText('ENERGY (Space to blast)', ex - 8, ey + 6)
+        ctx.fillText('ENERGY (Space/Click = blast)', ex - 8, ey + 6)
         
         // Controls hint
         ctx.font = '11px system-ui'
@@ -776,11 +809,15 @@ export default function NebulaDefender() {
       
       {/* Mode buttons */}
       {game.state === 'playing' && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex gap-2">
+        <div 
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex gap-2"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
           {(['repel', 'attract', 'vortex'] as Mode[]).map((m, i) => (
             <button
               key={m}
-              onClick={() => setMode(m)}
+              onClick={(e) => { e.stopPropagation(); setMode(m) }}
+              onMouseDown={(e) => e.stopPropagation()}
               className={`px-5 py-2.5 rounded-xl text-sm font-bold uppercase tracking-wide transition-all ${
                 mode === m
                   ? m === 'repel' ? 'bg-red-500 text-white shadow-lg shadow-red-500/40'
