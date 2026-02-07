@@ -377,11 +377,17 @@ export default function NebulaDefender() {
           }
         }
 
-        // Kill enemies pushed off-screen
-        const margin = 100
+        // Kill enemies pushed off-screen (only if moving AWAY from center)
+        const margin = 50
         if (e.x < -margin || e.x > width + margin || e.y < -margin || e.y > height + margin) {
+          // Check if moving away from center
+          const toCenterX = cx - e.x
+          const toCenterY = cy - e.y
+          const dotProduct = e.vx * toCenterX + e.vy * toCenterY
           const velocity = Math.sqrt(e.vx * e.vx + e.vy * e.vy)
-          if (velocity > 2) {
+          
+          // dotProduct < 0 means moving away from center
+          if (dotProduct < 0 && velocity > 3) {
             // Flung off screen = dead
             const baseScore = e.type === 'tank' ? 50 : e.type === 'fast' ? 20 : e.type === 'swarm' ? 10 : 15
             const comboMultiplier = 1 + comboRef.current * 0.1
