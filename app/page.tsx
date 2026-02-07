@@ -2,6 +2,27 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 
+// ==================== CONSTANTS ====================
+const GRID_SIZE = 22
+const RETURN_SPEED = 0.02
+const FRICTION = 0.94
+const CORE_RADIUS = 60
+const FORCE_RADIUS = 150
+const FORCE_STRENGTH = 15
+const BLAST_ENERGY_COST = 25
+const ENERGY_REGEN_RATE = 0.25
+const MAX_ENERGY = 100
+const MAX_COMBO = 50
+const COMBO_DURATION = 120
+const BASE_SPAWN_RATE = 180
+const MIN_SPAWN_RATE = 60
+const MAX_ENEMY_SPEED = 3
+const ORB_LIFETIME = 300
+const ORB_ATTRACT_RANGE = 150
+const ORB_COLLECT_RANGE = 30
+const WAVE_PROGRESS_THRESHOLD = 500
+const LOCAL_STORAGE_HIGH_SCORE_KEY = 'nebula-defender-high-score'
+
 interface Particle {
   x: number
   y: number
@@ -60,11 +81,6 @@ interface Wave {
 
 type Mode = 'repel' | 'attract' | 'vortex' | 'blast'
 
-const GRID_SIZE = 22
-const RETURN_SPEED = 0.02
-const FRICTION = 0.94
-const CORE_RADIUS = 60
-
 export default function NebulaDefender() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const particlesRef = useRef<Particle[]>([])
@@ -77,11 +93,8 @@ export default function NebulaDefender() {
   const timeRef = useRef(0)
   const shakeRef = useRef({ x: 0, y: 0, intensity: 0 })
   const lastSpawnRef = useRef(0)
-  const dimensionsRef = useRef({ width: 0, height: 0 })
   
   const [mode, setMode] = useState<Mode>('repel')
-  const [forceRadius, setForceRadius] = useState(150)
-  const [forceStrength, setForceStrength] = useState(15)
   const [score, setScore] = useState(0)
   const [coreHealth, setCoreHealth] = useState(100)
   const [wave, setWave] = useState(1)
@@ -91,6 +104,8 @@ export default function NebulaDefender() {
   const [highScore, setHighScore] = useState(0)
   const [showUI, setShowUI] = useState(true)
 
+  // Refs for animation loop access (updated directly before setState)
+  const modeRef = useRef<Mode>('repel')
   const scoreRef = useRef(0)
   const coreHealthRef = useRef(100)
   const waveRef = useRef(1)
@@ -98,22 +113,45 @@ export default function NebulaDefender() {
   const comboRef = useRef(0)
   const energyRef = useRef(100)
   const comboTimerRef = useRef(0)
+  const highScoreRef = useRef(0)
 
-  // Sync refs with state
-  useEffect(() => { scoreRef.current = score }, [score])
-  useEffect(() => { coreHealthRef.current = coreHealth }, [coreHealth])
-  useEffect(() => { waveRef.current = wave }, [wave])
-  useEffect(() => { gameStateRef.current = gameState }, [gameState])
-  useEffect(() => { comboRef.current = combo }, [combo])
-  useEffect(() => { energyRef.current = energy }, [energy])
+  // Sync modeRef separately (doesn't trigger particle reinit)
+  useEffect(() => { modeRef.current = mode }, [mode])
+
+  // Load high score from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem(LOCAL_STORAGE_HIGH_SCORE_KEY)
+    if (saved) {
+      const parsed = parseInt(saved, 10)
+      if (!isNaN(parsed)) {
+        highScoreRef.current = parsed
+        setHighScore(parsed)
+      }
+    }
+  }, [])
+
+  // Save high score to localStorage when it changes
+  useEffect(() => {
+    if (highScore > 0) {
+      localStorage.setItem(LOCAL_STORAGE_HIGH_SCORE_KEY, highScore.toString())
+    }
+  }, [highScore])
 
   const startGame = useCallback(() => {
+    scoreRef.current = 0
+    coreHealthRef.current = 100
+    waveRef.current = 1
+    comboRef.current = 0
+    energyRef.current = 100
+    gameStateRef.current = 'playing'
+    
     setScore(0)
     setCoreHealth(100)
     setWave(1)
     setCombo(0)
     setEnergy(100)
     setGameState('playing')
+    
     enemiesRef.current = []
     orbsRef.current = []
     explosionsRef.current = []
@@ -210,7 +248,7 @@ export default function NebulaDefender() {
       hue,
       health,
       maxHealth: health,
-      speed: Math.min(speed, 3),
+      speed: Math.min(speed, MAX_ENEMY_SPEED),
       type,
       stunned: 0
     }
@@ -225,7 +263,7 @@ export default function NebulaDefender() {
       hue: 180 + Math.random() * 60,
       size: 8 + value * 2,
       value,
-      life: 300
+      life: ORB_LIFETIME
     })
   }, [])
 
@@ -242,7 +280,6 @@ export default function NebulaDefender() {
     const resize = () => {
       width = canvas.width = window.innerWidth
       height = canvas.height = window.innerHeight
-      dimensionsRef.current = { width, height }
       particlesRef.current = initParticles(width, height)
     }
 
@@ -283,17 +320,19 @@ export default function NebulaDefender() {
     }
 
     const triggerBlast = (x: number, y: number) => {
-      if (energyRef.current < 25) return false
+      if (energyRef.current < BLAST_ENERGY_COST) return false
       
-      setEnergy(prev => prev - 25)
+      const newEnergy = energyRef.current - BLAST_ENERGY_COST
+      energyRef.current = newEnergy
+      setEnergy(newEnergy)
       
       wavesRef.current.push({
         x,
         y,
         radius: 0,
-        maxRadius: forceRadius * 2.5,
+        maxRadius: FORCE_RADIUS * 2.5,
         hue: 50,
-        strength: forceStrength * 2.5,
+        strength: FORCE_STRENGTH * 2.5,
         damage: 1.5
       })
 
@@ -301,7 +340,7 @@ export default function NebulaDefender() {
         x,
         y,
         radius: 0,
-        maxRadius: forceRadius * 1.5,
+        maxRadius: FORCE_RADIUS * 1.5,
         hue: 50,
         alpha: 1
       })
@@ -316,19 +355,22 @@ export default function NebulaDefender() {
       const cx = width / 2
       const cy = height / 2
       const mouse = mouseRef.current
-      const currentMode = mode
+      const currentMode = modeRef.current
 
       // Regenerate energy (faster regen)
-      setEnergy(prev => Math.min(100, prev + 0.25))
+      const newEnergy = Math.min(MAX_ENERGY, energyRef.current + ENERGY_REGEN_RATE)
+      energyRef.current = newEnergy
+      setEnergy(newEnergy)
 
       // Combo decay
       comboTimerRef.current -= 1
       if (comboTimerRef.current <= 0 && comboRef.current > 0) {
+        comboRef.current = 0
         setCombo(0)
       }
 
       // Spawn enemies
-      const spawnRate = Math.max(60, 180 - waveRef.current * 10)
+      const spawnRate = Math.max(MIN_SPAWN_RATE, BASE_SPAWN_RATE - waveRef.current * 10)
       if (timeRef.current - lastSpawnRef.current > spawnRate) {
         const count = Math.min(1 + Math.floor(waveRef.current / 3), 5)
         for (let i = 0; i < count; i++) {
@@ -338,8 +380,10 @@ export default function NebulaDefender() {
       }
 
       // Wave progression
-      if (scoreRef.current > waveRef.current * 500) {
-        setWave(prev => prev + 1)
+      if (scoreRef.current > waveRef.current * WAVE_PROGRESS_THRESHOLD) {
+        const newWave = waveRef.current + 1
+        waveRef.current = newWave
+        setWave(newWave)
       }
 
       // Update enemies
@@ -366,8 +410,8 @@ export default function NebulaDefender() {
 
         // Apply player force
         if (mouse.active && currentMode !== 'blast') {
-          const force = applyForce(e, mouse.x, mouse.y, forceRadius, forceStrength * 0.8, currentMode)
-          if (force > forceStrength * 0.3) {
+          const force = applyForce(e, mouse.x, mouse.y, FORCE_RADIUS, FORCE_STRENGTH * 0.8, currentMode)
+          if (force > FORCE_STRENGTH * 0.3) {
             e.stunned = Math.max(e.stunned, 10)
             // DAMAGE from force - the harder you push, the more it hurts
             const velocity = Math.sqrt(e.vx * e.vx + e.vy * e.vy)
@@ -391,9 +435,14 @@ export default function NebulaDefender() {
             // Flung off screen = dead
             const baseScore = e.type === 'tank' ? 50 : e.type === 'fast' ? 20 : e.type === 'swarm' ? 10 : 15
             const comboMultiplier = 1 + comboRef.current * 0.1
-            setScore(prev => prev + Math.floor(baseScore * comboMultiplier))
-            setCombo(prev => Math.min(prev + 1, 50))
-            comboTimerRef.current = 120
+            const newScore = scoreRef.current + Math.floor(baseScore * comboMultiplier)
+            scoreRef.current = newScore
+            setScore(newScore)
+            
+            const newCombo = Math.min(comboRef.current + 1, MAX_COMBO)
+            comboRef.current = newCombo
+            setCombo(newCombo)
+            comboTimerRef.current = COMBO_DURATION
             
             // Spawn orbs at edge
             const orbCount = e.type === 'tank' ? 3 : e.type === 'swarm' ? 1 : 2
@@ -436,15 +485,18 @@ export default function NebulaDefender() {
         // Check core collision
         const coreDist = Math.sqrt(Math.pow(e.x - cx, 2) + Math.pow(e.y - cy, 2))
         if (coreDist < CORE_RADIUS + e.size) {
-          setCoreHealth(prev => {
-            const damage = e.type === 'tank' ? 15 : e.type === 'swarm' ? 3 : 8
-            const newHealth = prev - damage
-            if (newHealth <= 0) {
-              setGameState('gameover')
-              setHighScore(prev => Math.max(prev, scoreRef.current))
-            }
-            return Math.max(0, newHealth)
-          })
+          const damage = e.type === 'tank' ? 15 : e.type === 'swarm' ? 3 : 8
+          const newHealth = Math.max(0, coreHealthRef.current - damage)
+          coreHealthRef.current = newHealth
+          setCoreHealth(newHealth)
+          
+          if (newHealth <= 0) {
+            gameStateRef.current = 'gameover'
+            setGameState('gameover')
+            const newHighScore = Math.max(highScoreRef.current, scoreRef.current)
+            highScoreRef.current = newHighScore
+            setHighScore(newHighScore)
+          }
           
           // Explosion effect
           explosionsRef.current.push({
@@ -458,6 +510,7 @@ export default function NebulaDefender() {
           
           shakeRef.current.intensity = 8
           enemies.splice(i, 1)
+          comboRef.current = 0
           setCombo(0)
           continue
         }
@@ -473,9 +526,14 @@ export default function NebulaDefender() {
           // Score with combo
           const baseScore = e.type === 'tank' ? 50 : e.type === 'fast' ? 20 : e.type === 'swarm' ? 10 : 15
           const comboMultiplier = 1 + comboRef.current * 0.1
-          setScore(prev => prev + Math.floor(baseScore * comboMultiplier))
-          setCombo(prev => Math.min(prev + 1, 50))
-          comboTimerRef.current = 120
+          const newScore = scoreRef.current + Math.floor(baseScore * comboMultiplier)
+          scoreRef.current = newScore
+          setScore(newScore)
+          
+          const newCombo = Math.min(comboRef.current + 1, MAX_COMBO)
+          comboRef.current = newCombo
+          setCombo(newCombo)
+          comboTimerRef.current = COMBO_DURATION
 
           // Death explosion
           explosionsRef.current.push({
@@ -502,15 +560,20 @@ export default function NebulaDefender() {
           const dy = mouse.y - o.y
           const dist = Math.sqrt(dx * dx + dy * dy)
           
-          if (dist < 150) {
+          if (dist < ORB_ATTRACT_RANGE) {
             o.vx += (dx / dist) * 2
             o.vy += (dy / dist) * 2
           }
           
           // Collect
-          if (dist < 30) {
-            setScore(prev => prev + o.value * 5)
-            setEnergy(prev => Math.min(100, prev + o.value * 3))
+          if (dist < ORB_COLLECT_RANGE) {
+            const newScore = scoreRef.current + o.value * 5
+            scoreRef.current = newScore
+            setScore(newScore)
+            
+            const newEnergy = Math.min(MAX_ENERGY, energyRef.current + o.value * 3)
+            energyRef.current = newEnergy
+            setEnergy(newEnergy)
             orbs.splice(i, 1)
             continue
           }
@@ -548,12 +611,12 @@ export default function NebulaDefender() {
       const enemies = enemiesRef.current
       const cx = width / 2
       const cy = height / 2
-      const currentMode = mode
+      const currentMode = modeRef.current
 
       for (const p of particles) {
         // Player force
         if (mouse.active && gameStateRef.current === 'playing' && currentMode !== 'blast') {
-          applyForce(p, mouse.x, mouse.y, forceRadius, forceStrength * 0.5, currentMode)
+          applyForce(p, mouse.x, mouse.y, FORCE_RADIUS, FORCE_STRENGTH * 0.5, currentMode)
         }
 
         // Enemy influence
@@ -619,6 +682,7 @@ export default function NebulaDefender() {
       const cx = width / 2
       const cy = height / 2
       const mouse = mouseRef.current
+      const currentMode = modeRef.current
 
       ctx.save()
       ctx.translate(shake.x, shake.y)
@@ -800,19 +864,19 @@ export default function NebulaDefender() {
 
       // Draw cursor
       if (mouse.active && gameStateRef.current === 'playing') {
-        const cursorHue = mode === 'repel' ? 0 : mode === 'attract' ? 120 : mode === 'vortex' ? 200 : 50
+        const cursorHue = currentMode === 'repel' ? 0 : currentMode === 'attract' ? 120 : currentMode === 'vortex' ? 200 : 50
 
         ctx.strokeStyle = `hsla(${cursorHue}, 80%, 60%, 0.5)`
         ctx.lineWidth = 2
         ctx.setLineDash([8, 8])
         ctx.beginPath()
-        ctx.arc(mouse.x, mouse.y, forceRadius, 0, Math.PI * 2)
+        ctx.arc(mouse.x, mouse.y, FORCE_RADIUS, 0, Math.PI * 2)
         ctx.stroke()
         ctx.setLineDash([])
 
         for (let i = 0; i < 3; i++) {
           const phase = (time * 0.02 + i / 3) % 1
-          const radius = forceRadius * phase
+          const radius = FORCE_RADIUS * phase
           const alpha = (1 - phase) * 0.4
 
           ctx.strokeStyle = `hsla(${cursorHue}, 90%, 65%, ${alpha})`
@@ -875,7 +939,7 @@ export default function NebulaDefender() {
     }
 
     const handleMouseDown = () => {
-      if (mode === 'blast') {
+      if (modeRef.current === 'blast') {
         triggerBlast(mouseRef.current.x, mouseRef.current.y)
       }
     }
@@ -893,7 +957,7 @@ export default function NebulaDefender() {
       mouseRef.current.x = touch.clientX
       mouseRef.current.y = touch.clientY
       mouseRef.current.active = true
-      if (mode === 'blast') {
+      if (modeRef.current === 'blast') {
         triggerBlast(touch.clientX, touch.clientY)
       }
     }
@@ -941,7 +1005,7 @@ export default function NebulaDefender() {
       canvas.removeEventListener('touchend', handleTouchEnd)
       if (animationRef.current) cancelAnimationFrame(animationRef.current)
     }
-  }, [mode, forceRadius, forceStrength, showUI, initParticles, spawnEnemy, spawnOrb, startGame])
+  }, [showUI, initParticles, spawnEnemy, spawnOrb, startGame])
 
   return (
     <div className="w-full h-screen bg-[#050312] overflow-hidden relative">
