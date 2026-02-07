@@ -368,25 +368,10 @@ export default function NebulaDefender() {
       const mouse = mouseRef.current
       const currentMode = modeRef.current
 
-      // Regenerate energy (only when not using force)
-      if (!mouseRef.current.active || currentMode === 'blast') {
-        const newEnergy = Math.min(MAX_ENERGY, energyRef.current + ENERGY_REGEN_RATE)
-        energyRef.current = newEnergy
-        setEnergy(newEnergy)
-      }
-      
-      // Drain energy when using force modes
-      if (mouseRef.current.active && currentMode !== 'blast' && energyRef.current > 0) {
-        const drainRate = currentMode === 'repel' ? REPEL_ENERGY_COST : 
-                          currentMode === 'vortex' ? VORTEX_ENERGY_COST : ATTRACT_ENERGY_COST
-        const newEnergy = Math.max(0, energyRef.current - drainRate)
-        energyRef.current = newEnergy
-        setEnergy(newEnergy)
-      }
-      
-      // Calculate force effectiveness (weaker near core center)
-      const cursorDistFromCore = Math.sqrt(Math.pow(mouse.x - cx, 2) + Math.pow(mouse.y - cy, 2))
-      const forceEffectiveness = Math.max(0.3, Math.min(1, cursorDistFromCore / 100))
+      // Regenerate energy
+      const newEnergy = Math.min(MAX_ENERGY, energyRef.current + ENERGY_REGEN_RATE)
+      energyRef.current = newEnergy
+      setEnergy(newEnergy)
 
       // Combo decay
       comboTimerRef.current -= 1
@@ -434,23 +419,9 @@ export default function NebulaDefender() {
           }
         }
 
-        // Apply player force (only if we have energy)
-        if (mouse.active && currentMode !== 'blast' && energyRef.current > 0) {
-          // Attract penalty: if pulling enemy away from core, reduce effectiveness
-          let effectiveMult = forceEffectiveness
-          if (currentMode === 'attract') {
-            const enemyToCoreX = cx - e.x
-            const enemyToCoreY = cy - e.y
-            const enemyToCursorX = mouse.x - e.x
-            const enemyToCursorY = mouse.y - e.y
-            const attractDot = enemyToCoreX * enemyToCursorX + enemyToCoreY * enemyToCursorY
-            if (attractDot < 0) {
-              // Pulling away from core - heavily penalize
-              effectiveMult *= 0.2
-            }
-          }
-          
-          const force = applyForce(e, mouse.x, mouse.y, FORCE_RADIUS, FORCE_STRENGTH * 0.8 * effectiveMult, currentMode)
+        // Apply player force
+        if (mouse.active && currentMode !== 'blast') {
+          const force = applyForce(e, mouse.x, mouse.y, FORCE_RADIUS, FORCE_STRENGTH * 0.8, currentMode)
           if (force > FORCE_STRENGTH * 0.3) {
             e.stunned = Math.max(e.stunned, 10)
             // DAMAGE from force - the harder you push, the more it hurts
