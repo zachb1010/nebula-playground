@@ -9,18 +9,25 @@ const FRICTION = 0.94
 const CORE_RADIUS = 60
 const FORCE_RADIUS = 150
 const FORCE_STRENGTH = 15
-const BLAST_ENERGY_COST = 25
-const ENERGY_REGEN_RATE = 0.25
+const BLAST_ENERGY_COST = 20
+const ENERGY_REGEN_RATE = 0.1
 const MAX_ENERGY = 100
 const MAX_COMBO = 50
-const COMBO_DURATION = 120
-const BASE_SPAWN_RATE = 180
-const MIN_SPAWN_RATE = 60
-const MAX_ENEMY_SPEED = 3
+const COMBO_DURATION = 180
+const BASE_SPAWN_RATE = 150
+const MIN_SPAWN_RATE = 40
+const MAX_ENEMY_SPEED = 2.5
 const ORB_LIFETIME = 300
 const ORB_ATTRACT_RANGE = 150
 const ORB_COLLECT_RANGE = 30
-const WAVE_PROGRESS_THRESHOLD = 500
+const WAVE_PROGRESS_THRESHOLD = 700
+const SPAWN_INVULN_FRAMES = 60
+const VELOCITY_DAMAGE_THRESHOLD = 2
+const VELOCITY_DAMAGE_MULT = 0.025
+// Energy drain per frame when using force modes
+const REPEL_ENERGY_COST = 0.4
+const VORTEX_ENERGY_COST = 0.3
+const ATTRACT_ENERGY_COST = 0.2
 const LOCAL_STORAGE_HIGH_SCORE_KEY = 'nebula-defender-high-score'
 
 interface Particle {
@@ -47,6 +54,7 @@ interface Enemy {
   speed: number
   type: 'basic' | 'fast' | 'tank' | 'swarm'
   stunned: number
+  spawnFrames: number  // Invulnerability frames after spawn
 }
 
 interface Orb {
@@ -203,35 +211,36 @@ export default function NebulaDefender() {
     const cx = width / 2
     const cy = height / 2
     
+    // Earlier enemy type unlocks
     const types: Array<Enemy['type']> = ['basic', 'basic', 'basic']
-    if (waveNum >= 3) types.push('fast', 'fast')
-    if (waveNum >= 5) types.push('tank')
-    if (waveNum >= 7) types.push('swarm', 'swarm', 'swarm')
+    if (waveNum >= 2) types.push('fast', 'fast')
+    if (waveNum >= 3) types.push('tank')
+    if (waveNum >= 5) types.push('swarm', 'swarm', 'swarm')
     
     const type = types[Math.floor(Math.random() * types.length)]
     
-    const baseSpeed = 0.8 + waveNum * 0.1
+    const baseSpeed = 1.0 + waveNum * 0.12  // Faster base speed
     let speed = baseSpeed
-    let health = 1
+    let health = 2  // Buffed from 1
     let size = 15
     let hue = 0
     
     switch (type) {
       case 'fast':
         speed = baseSpeed * 1.8
-        health = 0.5
+        health = 1  // Buffed from 0.5
         size = 10
         hue = 40 // Orange
         break
       case 'tank':
         speed = baseSpeed * 0.5
-        health = 3
+        health = 5  // Buffed from 3
         size = 25
         hue = 280 // Purple
         break
       case 'swarm':
         speed = baseSpeed * 1.2
-        health = 0.3
+        health = 0.5  // Buffed from 0.3
         size = 8
         hue = 120 // Green
         break
@@ -250,7 +259,8 @@ export default function NebulaDefender() {
       maxHealth: health,
       speed: Math.min(speed, MAX_ENEMY_SPEED),
       type,
-      stunned: 0
+      stunned: 0,
+      spawnFrames: SPAWN_INVULN_FRAMES  // 1 second of spawn protection
     }
   }, [])
 
@@ -310,8 +320,9 @@ export default function NebulaDefender() {
             obj.vy -= ny * force * 0.8
             break
           case 'vortex':
-            obj.vx += (-ny * force * 1.3 + nx * force * 0.2)
-            obj.vy += (nx * force * 1.3 + ny * force * 0.2)
+            // Pure spin - no outward push (prevents orbit trap)
+            obj.vx += -ny * force * 1.0
+            obj.vy += nx * force * 1.0
             break
         }
         return force
@@ -333,7 +344,7 @@ export default function NebulaDefender() {
         maxRadius: FORCE_RADIUS * 2.5,
         hue: 50,
         strength: FORCE_STRENGTH * 2.5,
-        damage: 1.5
+        damage: 1.0
       })
 
       explosionsRef.current.push({
@@ -357,10 +368,25 @@ export default function NebulaDefender() {
       const mouse = mouseRef.current
       const currentMode = modeRef.current
 
-      // Regenerate energy (faster regen)
-      const newEnergy = Math.min(MAX_ENERGY, energyRef.current + ENERGY_REGEN_RATE)
-      energyRef.current = newEnergy
-      setEnergy(newEnergy)
+      // Regenerate energy (only when not using force)
+      if (!mouseRef.current.active || currentMode === 'blast') {
+        const newEnergy = Math.min(MAX_ENERGY, energyRef.current + ENERGY_REGEN_RATE)
+        energyRef.current = newEnergy
+        setEnergy(newEnergy)
+      }
+      
+      // Drain energy when using force modes
+      if (mouseRef.current.active && currentMode !== 'blast' && energyRef.current > 0) {
+        const drainRate = currentMode === 'repel' ? REPEL_ENERGY_COST : 
+                          currentMode === 'vortex' ? VORTEX_ENERGY_COST : ATTRACT_ENERGY_COST
+        const newEnergy = Math.max(0, energyRef.current - drainRate)
+        energyRef.current = newEnergy
+        setEnergy(newEnergy)
+      }
+      
+      // Calculate force effectiveness (weaker near core center)
+      const cursorDistFromCore = Math.sqrt(Math.pow(mouse.x - cx, 2) + Math.pow(mouse.y - cy, 2))
+      const forceEffectiveness = Math.max(0.3, Math.min(1, cursorDistFromCore / 100))
 
       // Combo decay
       comboTimerRef.current -= 1
@@ -370,9 +396,9 @@ export default function NebulaDefender() {
       }
 
       // Spawn enemies
-      const spawnRate = Math.max(MIN_SPAWN_RATE, BASE_SPAWN_RATE - waveRef.current * 10)
+      const spawnRate = Math.max(MIN_SPAWN_RATE, BASE_SPAWN_RATE - waveRef.current * 12)
       if (timeRef.current - lastSpawnRef.current > spawnRate) {
-        const count = Math.min(1 + Math.floor(waveRef.current / 3), 5)
+        const count = Math.min(1 + Math.floor(waveRef.current / 3), 8)  // Cap raised to 8
         for (let i = 0; i < count; i++) {
           enemiesRef.current.push(spawnEnemy(width, height, waveRef.current))
         }
@@ -403,27 +429,50 @@ export default function NebulaDefender() {
           const dist = Math.sqrt(dx * dx + dy * dy)
           
           if (dist > 0) {
-            e.vx += (dx / dist) * e.speed * 0.1
-            e.vy += (dy / dist) * e.speed * 0.1
+            e.vx += (dx / dist) * e.speed * 0.15  // Stronger core-seek
+            e.vy += (dy / dist) * e.speed * 0.15
           }
         }
 
-        // Apply player force
-        if (mouse.active && currentMode !== 'blast') {
-          const force = applyForce(e, mouse.x, mouse.y, FORCE_RADIUS, FORCE_STRENGTH * 0.8, currentMode)
+        // Apply player force (only if we have energy)
+        if (mouse.active && currentMode !== 'blast' && energyRef.current > 0) {
+          // Attract penalty: if pulling enemy away from core, reduce effectiveness
+          let effectiveMult = forceEffectiveness
+          if (currentMode === 'attract') {
+            const enemyToCoreX = cx - e.x
+            const enemyToCoreY = cy - e.y
+            const enemyToCursorX = mouse.x - e.x
+            const enemyToCursorY = mouse.y - e.y
+            const attractDot = enemyToCoreX * enemyToCursorX + enemyToCoreY * enemyToCursorY
+            if (attractDot < 0) {
+              // Pulling away from core - heavily penalize
+              effectiveMult *= 0.2
+            }
+          }
+          
+          const force = applyForce(e, mouse.x, mouse.y, FORCE_RADIUS, FORCE_STRENGTH * 0.8 * effectiveMult, currentMode)
           if (force > FORCE_STRENGTH * 0.3) {
             e.stunned = Math.max(e.stunned, 10)
             // DAMAGE from force - the harder you push, the more it hurts
-            const velocity = Math.sqrt(e.vx * e.vx + e.vy * e.vy)
-            if (velocity > 3) {
-              e.health -= velocity * 0.015
+            // Only if past spawn invulnerability
+            if (e.spawnFrames <= 0) {
+              const velocity = Math.sqrt(e.vx * e.vx + e.vy * e.vy)
+              if (velocity > VELOCITY_DAMAGE_THRESHOLD) {
+                e.health -= velocity * VELOCITY_DAMAGE_MULT
+              }
             }
           }
         }
+        
+        // Decrement spawn invulnerability
+        if (e.spawnFrames > 0) {
+          e.spawnFrames--
+        }
 
         // Kill enemies pushed off-screen (only if moving AWAY from center)
+        // Skip if still in spawn invulnerability
         const margin = 50
-        if (e.x < -margin || e.x > width + margin || e.y < -margin || e.y > height + margin) {
+        if (e.spawnFrames <= 0 && (e.x < -margin || e.x > width + margin || e.y < -margin || e.y > height + margin)) {
           // Check if moving away from center
           const toCenterX = cx - e.x
           const toCenterY = cy - e.y
@@ -432,23 +481,21 @@ export default function NebulaDefender() {
           
           // dotProduct < 0 means moving away from center
           if (dotProduct < 0 && velocity > 3) {
-            // Flung off screen = dead
+            // Flung off screen = REDUCED rewards (50% score, no orbs, +0.5 combo)
             const baseScore = e.type === 'tank' ? 50 : e.type === 'fast' ? 20 : e.type === 'swarm' ? 10 : 15
             const comboMultiplier = 1 + comboRef.current * 0.1
-            const newScore = scoreRef.current + Math.floor(baseScore * comboMultiplier)
+            const newScore = scoreRef.current + Math.floor((baseScore * comboMultiplier) / 2)  // Half score
             scoreRef.current = newScore
             setScore(newScore)
             
-            const newCombo = Math.min(comboRef.current + 1, MAX_COMBO)
+            // Reduced combo gain
+            const comboGain = e.type === 'tank' ? 1 : 0.5  // Only tanks give full combo
+            const newCombo = Math.min(comboRef.current + comboGain, MAX_COMBO)
             comboRef.current = newCombo
-            setCombo(newCombo)
+            setCombo(Math.floor(newCombo))
             comboTimerRef.current = COMBO_DURATION
             
-            // Spawn orbs at edge
-            const orbCount = e.type === 'tank' ? 3 : e.type === 'swarm' ? 1 : 2
-            for (let j = 0; j < orbCount; j++) {
-              spawnOrb(Math.max(10, Math.min(width - 10, e.x)), Math.max(10, Math.min(height - 10, e.y)), e.type === 'tank' ? 2 : 1)
-            }
+            // NO orbs for off-screen kills (anti-exploit)
             
             enemies.splice(i, 1)
             continue
@@ -485,7 +532,7 @@ export default function NebulaDefender() {
         // Check core collision
         const coreDist = Math.sqrt(Math.pow(e.x - cx, 2) + Math.pow(e.y - cy, 2))
         if (coreDist < CORE_RADIUS + e.size) {
-          const damage = e.type === 'tank' ? 15 : e.type === 'swarm' ? 3 : 8
+          const damage = e.type === 'tank' ? 12 : e.type === 'swarm' ? 2 : 6  // Reduced damage
           const newHealth = Math.max(0, coreHealthRef.current - damage)
           coreHealthRef.current = newHealth
           setCoreHealth(newHealth)
@@ -530,9 +577,11 @@ export default function NebulaDefender() {
           scoreRef.current = newScore
           setScore(newScore)
           
-          const newCombo = Math.min(comboRef.current + 1, MAX_COMBO)
+          // Combo gain based on enemy type
+          const comboGain = e.type === 'tank' ? 2 : e.type === 'swarm' ? 0.5 : 1
+          const newCombo = Math.min(comboRef.current + comboGain, MAX_COMBO)
           comboRef.current = newCombo
-          setCombo(newCombo)
+          setCombo(Math.floor(newCombo))
           comboTimerRef.current = COMBO_DURATION
 
           // Death explosion
