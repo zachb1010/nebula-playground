@@ -10,7 +10,7 @@ const CORE_RADIUS = 60
 const FORCE_RADIUS = 150
 const FORCE_STRENGTH = 15
 const BLAST_ENERGY_COST = 20
-const ENERGY_REGEN_RATE = 0.1
+const ENERGY_REGEN_RATE = 0.15
 const MAX_ENERGY = 100
 const MAX_COMBO = 50
 const COMBO_DURATION = 180
@@ -23,11 +23,11 @@ const ORB_COLLECT_RANGE = 30
 const WAVE_PROGRESS_THRESHOLD = 700
 const SPAWN_INVULN_FRAMES = 60
 const VELOCITY_DAMAGE_THRESHOLD = 2
-const VELOCITY_DAMAGE_MULT = 0.025
+const VELOCITY_DAMAGE_MULT = 0.08  // Buffed - pushing hard actually hurts
 // Energy drain per frame when using force modes
-const REPEL_ENERGY_COST = 0.4
-const VORTEX_ENERGY_COST = 0.3
-const ATTRACT_ENERGY_COST = 0.2
+const REPEL_ENERGY_COST = 0.15
+const VORTEX_ENERGY_COST = 0.12
+const ATTRACT_ENERGY_COST = 0.08
 const LOCAL_STORAGE_HIGH_SCORE_KEY = 'nebula-defender-high-score'
 
 interface Particle {
@@ -221,26 +221,26 @@ export default function NebulaDefender() {
     
     const baseSpeed = 1.0 + waveNum * 0.12  // Faster base speed
     let speed = baseSpeed
-    let health = 2  // Buffed from 1
+    let health = 1  // Reverted - was too tanky
     let size = 15
     let hue = 0
     
     switch (type) {
       case 'fast':
         speed = baseSpeed * 1.8
-        health = 1  // Buffed from 0.5
+        health = 0.5  // Reverted
         size = 10
         hue = 40 // Orange
         break
       case 'tank':
         speed = baseSpeed * 0.5
-        health = 5  // Buffed from 3
+        health = 3  // Reverted
         size = 25
         hue = 280 // Purple
         break
       case 'swarm':
         speed = baseSpeed * 1.2
-        health = 0.5  // Buffed from 0.3
+        health = 0.3  // Reverted
         size = 8
         hue = 120 // Green
         break
@@ -344,7 +344,7 @@ export default function NebulaDefender() {
         maxRadius: FORCE_RADIUS * 2.5,
         hue: 50,
         strength: FORCE_STRENGTH * 2.5,
-        damage: 1.0
+        damage: 1.5  // Buffed back up
       })
 
       explosionsRef.current.push({
