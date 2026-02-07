@@ -22,6 +22,7 @@ const ORB_ATTRACT_RANGE = 150
 const ORB_COLLECT_RANGE = 30
 const WAVE_PROGRESS_THRESHOLD = 700
 const SPAWN_INVULN_FRAMES = 60
+const FORCE_RESIST_THRESHOLD = 30  // 0.5 seconds - enemy pushes through after this
 const VELOCITY_DAMAGE_THRESHOLD = 2
 const VELOCITY_DAMAGE_MULT = 0.08  // Buffed - pushing hard actually hurts
 // Energy drain per frame when using force modes
@@ -55,6 +56,7 @@ interface Enemy {
   type: 'basic' | 'fast' | 'tank' | 'swarm'
   stunned: number
   spawnFrames: number  // Invulnerability frames after spawn
+  forceTime: number    // How long in force field (pushes through after threshold)
 }
 
 interface Orb {
@@ -260,7 +262,8 @@ export default function NebulaDefender() {
       speed: Math.min(speed, MAX_ENEMY_SPEED),
       type,
       stunned: 0,
-      spawnFrames: SPAWN_INVULN_FRAMES  // 1 second of spawn protection
+      spawnFrames: SPAWN_INVULN_FRAMES,  // 1 second of spawn protection
+      forceTime: 0  // Tracks time in force field
     }
   }, [])
 
@@ -419,20 +422,35 @@ export default function NebulaDefender() {
           }
         }
 
-        // Apply player force
+        // Apply player force (but enemies push through after 0.5s in field)
         if (mouse.active && currentMode !== 'blast') {
-          const force = applyForce(e, mouse.x, mouse.y, FORCE_RADIUS, FORCE_STRENGTH * 0.8, currentMode)
-          if (force > FORCE_STRENGTH * 0.3) {
-            e.stunned = Math.max(e.stunned, 10)
-            // DAMAGE from force - the harder you push, the more it hurts
-            // Only if past spawn invulnerability
-            if (e.spawnFrames <= 0) {
-              const velocity = Math.sqrt(e.vx * e.vx + e.vy * e.vy)
-              if (velocity > VELOCITY_DAMAGE_THRESHOLD) {
-                e.health -= velocity * VELOCITY_DAMAGE_MULT
+          const dx = e.x - mouse.x
+          const dy = e.y - mouse.y
+          const distToMouse = Math.sqrt(dx * dx + dy * dy)
+          
+          // Track time in force field
+          if (distToMouse < FORCE_RADIUS) {
+            e.forceTime++
+          } else {
+            e.forceTime = 0  // Reset when outside
+          }
+          
+          // Only apply force if enemy hasn't resisted long enough
+          if (e.forceTime < FORCE_RESIST_THRESHOLD) {
+            const force = applyForce(e, mouse.x, mouse.y, FORCE_RADIUS, FORCE_STRENGTH * 0.8, currentMode)
+            if (force > FORCE_STRENGTH * 0.3) {
+              e.stunned = Math.max(e.stunned, 10)
+              // DAMAGE from force - the harder you push, the more it hurts
+              // Only if past spawn invulnerability
+              if (e.spawnFrames <= 0) {
+                const velocity = Math.sqrt(e.vx * e.vx + e.vy * e.vy)
+                if (velocity > VELOCITY_DAMAGE_THRESHOLD) {
+                  e.health -= velocity * VELOCITY_DAMAGE_MULT
+                }
               }
             }
           }
+          // else: enemy has resisted long enough, pushes through
         }
         
         // Decrement spawn invulnerability
